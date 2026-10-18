@@ -48,11 +48,13 @@ class SMOTEFUNA:
         shuffle: bool = True,
         max_attempts_factor: int = 50,
         random_state: Optional[int] = None,
+        strict: bool = False,
     ) -> None:
         self.sampling_strategy = sampling_strategy
         self.shuffle = shuffle
         self.max_attempts_factor = max_attempts_factor
         self.random_state = random_state
+        self.strict = strict
 
     def fit_resample(
         self, X: ArrayLike, y: ArrayLike
@@ -187,10 +189,19 @@ class SMOTEFUNA:
                 accepted += 1
 
         if accepted < rate:
-            raise RuntimeError(
-                f"Could only accept {accepted}/{rate} synthetic samples "
-                f"after {attempts} attempts. The minority/majority geometry "
-                f"may be heavily overlapping; try more minority seeds or "
-                f"increase max_attempts_factor."
+            if self.strict:
+                raise RuntimeError(
+                    f"Could only accept {accepted}/{rate} synthetic samples "
+                    f"after {attempts} attempts. The minority/majority geometry "
+                    f"may be heavily overlapping; try more minority seeds or "
+                    f"increase max_attempts_factor."
+                )
+            import warnings
+
+            warnings.warn(
+                f"SMOTEFUNA generated {accepted}/{rate} synthetic samples after "
+                f"{attempts} attempts due to high class overlap. Returning available samples.",
+                UserWarning,
             )
+            return synthetics[:accepted]
         return synthetics
