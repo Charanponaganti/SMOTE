@@ -15,6 +15,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -79,6 +81,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="Random seed for reproducibility. Default=42.",
+    )
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="Download real OpenML/KEEL-style datasets instead of generated stand-ins.",
     )
     return parser.parse_args()
 
@@ -170,17 +177,31 @@ def main() -> None:
     print(" SMOTEFUNA RESEARCH BENCHMARK EXPERIMENT PIPELINE")
     print("=================================================================")
 
+    use_real = bool(args.real)
+    if use_real:
+        print("Data source: REAL OpenML/KEEL-style datasets (--real)")
+    else:
+        print("Data source: generated stand-ins (pass --real to use OpenML)")
+
     # Select datasets
     if args.datasets:
         d_ids = [d.strip() for d in args.datasets.split(",") if d.strip()]
-        datasets = {f"{meta.dataset_id}_{meta.name}": load_benchmark_dataset(meta.dataset_id, seed=args.seed) for meta in [TABLE_1_DATASETS[d] if d in TABLE_1_DATASETS else load_benchmark_dataset(d, seed=args.seed)[2] for d in d_ids]}
+        datasets = {}
+        for d in d_ids:
+            X, y, meta = load_benchmark_dataset(
+                d, seed=args.seed, allow_online=use_real, verbose=True
+            )
+            datasets[f"{meta.dataset_id}_{meta.name}"] = (X, y, meta)
     elif args.full:
         print("Loading all 33 benchmark datasets from Table 1...")
-        datasets = load_all_benchmark_datasets(seed=args.seed)
+        datasets = load_all_benchmark_datasets(
+            seed=args.seed, allow_online=use_real, verbose=True
+        )
     else:
-        # Default or quick: representative suite
         print("Loading representative suite of benchmark datasets...")
-        datasets = load_representative_suite(seed=args.seed)
+        datasets = load_representative_suite(
+            seed=args.seed, allow_online=use_real, verbose=True
+        )
 
     print(f"Selected {len(datasets)} datasets for evaluation.")
     print(f"Configuration: 5-fold CV, {args.n_trials} trial(s), seed={args.seed}")
@@ -228,6 +249,7 @@ def main() -> None:
             classifier_name="NB",
             save_path=figures_dir / "fig9_nb_roc_pr_curves.png",
             seed=args.seed,
+            allow_online=use_real,
         )
 
         plot_roc_and_pr_grid(
@@ -235,6 +257,7 @@ def main() -> None:
             classifier_name="SVM",
             save_path=figures_dir / "fig10_svm_roc_pr_curves.png",
             seed=args.seed,
+            allow_online=use_real,
         )
 
         # Figure 8: PCA 2D projections
@@ -246,6 +269,7 @@ def main() -> None:
             dataset_ids=pca_d_ids,
             save_path=figures_dir / "fig8_pca_projections.png",
             seed=args.seed,
+            allow_online=use_real,
         )
         print(f"Publication figures successfully saved to {figures_dir}")
 

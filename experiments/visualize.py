@@ -48,6 +48,7 @@ def plot_roc_and_pr_grid(
     classifier_name: str = "NB",
     save_path: Optional[Path] = None,
     seed: int = 42,
+    allow_online: bool = False,
 ) -> plt.Figure:
     """
     Plots a multi-row grid of ROC (left) and PR (right) curves comparing all methods,
@@ -68,7 +69,7 @@ def plot_roc_and_pr_grid(
     methods = ["SMOTEFUNA", "SMOTE", "ADASYN", "SWIM", "Original"]
 
     for row_idx, d_id in enumerate(dataset_ids):
-        X, y, meta = load_benchmark_dataset(d_id, seed=seed)
+        X, y, meta = load_benchmark_dataset(d_id, seed=seed, allow_online=allow_online)
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
         train_idx, test_idx = next(skf.split(X, y))
 
@@ -145,6 +146,7 @@ def plot_pca_projections(
     dataset_ids: List[str],
     save_path: Optional[Path] = None,
     seed: int = 42,
+    allow_online: bool = False,
 ) -> plt.Figure:
     """
     Reproduces Figure 8 of the paper:
@@ -165,7 +167,7 @@ def plot_pca_projections(
 
     for idx, d_id in enumerate(dataset_ids):
         ax = axes_flat[idx]
-        X, y, meta = load_benchmark_dataset(d_id, seed=seed)
+        X, y, meta = load_benchmark_dataset(d_id, seed=seed, allow_online=allow_online)
 
         # Run SMOTEFUNA
         resampler = get_resampler("SMOTEFUNA", random_state=seed, shuffle=False)

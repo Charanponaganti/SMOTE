@@ -47,8 +47,14 @@ python experiments/run_experiments.py --quick
 ```
 
 ### Full Benchmark (All 33 Datasets from Table 1)
+Generated stand-ins (offline):
 ```bash
 python experiments/run_experiments.py --full --n-trials 1
+```
+
+Real OpenML / KEEL-style data (needs internet the first time, then caches under `experiments/data_cache/`):
+```bash
+python experiments/run_experiments.py --full --real --n-trials 5 --output-dir experiments/results_real
 ```
 
 ### Specific Datasets & Multi-Trial Evaluation

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.cursor/
+_eq_cache/
+experiments/data_cache/
+make_slides.py
+*.pptx~
+~$*
