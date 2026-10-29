@@ -227,3 +227,4 @@ class BenchmarkPipeline:
             "table3_p_values": table3_df,
             "table4_wilcoxon_ranks": table4_df,
         }
+

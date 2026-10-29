@@ -175,3 +175,4 @@ def test_pipeline_integration():
     assert "SMOTEFUNA" in res["NB"]
     assert len(res["NB"]["SMOTEFUNA"].auc_scores) == 2  # 2 folds
     assert res["NB"]["SMOTEFUNA"].auc_mean > 0.0
+

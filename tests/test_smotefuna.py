@@ -73,3 +73,4 @@ def test_accepted_points_nearer_to_minority():
         theta = np.min(np.sum(np.abs(minority - s), axis=1))
         beta = np.min(np.sum(np.abs(majority - s), axis=1))
         assert theta <= beta + 1e-9
+

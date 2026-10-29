@@ -68,3 +68,4 @@ def compute_win_counts(
             wins[winner] += 1
 
     return wins
+

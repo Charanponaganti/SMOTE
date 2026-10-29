@@ -261,3 +261,4 @@ def get_resampler(
     if normalized == "SMOTEFUNA":
         return cls(random_state=random_state, strict=False, **kwargs)
     return cls(random_state=random_state, **kwargs)
+

@@ -159,3 +159,4 @@ def compute_statistical_suite(
     table4_df = pd.DataFrame(r_w_records)
 
     return table3_df, table4_df
+

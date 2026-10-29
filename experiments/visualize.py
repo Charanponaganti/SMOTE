@@ -209,3 +209,4 @@ def plot_pca_projections(
         print(f"Saved PCA projection figure to {save_path}")
 
     return fig
+

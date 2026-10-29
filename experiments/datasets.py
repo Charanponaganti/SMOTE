@@ -415,3 +415,4 @@ def load_all_benchmark_datasets(
         )
         all_data[f"{meta.dataset_id}_{meta.name}"] = (X, y, meta)
     return all_data
+

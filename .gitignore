@@ -10,3 +10,5 @@ make_slides.py
 *.pptx~
 ~$*
 notebooks/
+paper_figures/
+
