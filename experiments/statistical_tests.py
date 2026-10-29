@@ -1,14 +1,7 @@
-"""
-Statistical Significance Analysis: Wilcoxon Signed-Rank Test.
+"""Wilcoxon signed-rank, same numbers the paper reports in Tables 3 and 4.
 
-Implements the Wilcoxon signed-rank test and effect size calculation
-according to Tarawneh et al., Section IV-D:
-- p-value of paired tests (Table 3)
-- Sum of positive ranks (W+)
-- Sum of negative ranks (W-)
-- Wilcoxon Z statistic
-- Effect size R = |Z| / sqrt(N) (Table 4)
-- Effect categorization: Small (R <= 0.1), Medium (0.1 < R < 0.5), Large (R >= 0.5)
+W+ is for SMOTEFUNA, W- is for the other method.
+R = |Z| / sqrt(N), N=33 datasets.
 """
 
 from __future__ import annotations
@@ -46,26 +39,7 @@ def compute_wilcoxon_signed_rank(
     name_b: str = "Baseline",
     zero_method: str = "wilcox",
 ) -> WilcoxonComparisonResult:
-    """
-    Computes the paired Wilcoxon signed-rank test and effect size R.
-
-    Parameters
-    ----------
-    scores_a : array-like of shape (N,)
-        Scores for proposed method (e.g. SMOTEFUNA).
-    scores_b : array-like of shape (N,)
-        Scores for baseline method (e.g. SMOTE, ADASYN, SWIM, OR).
-    name_a : str
-        Name of method A.
-    name_b : str
-        Name of method B.
-    zero_method : str
-        Method to handle zero differences ('wilcox' discards zeros).
-
-    Returns
-    -------
-    WilcoxonComparisonResult
-    """
+    """Paired test: scores_a vs scores_b, one number per dataset."""
     a = np.asarray(scores_a, dtype=float)
     b = np.asarray(scores_b, dtype=float)
     if len(a) != len(b):
@@ -74,7 +48,7 @@ def compute_wilcoxon_signed_rank(
     n_total = len(a)
     diff = a - b
 
-    # Filter non-zero differences
+    # drop exact ties (wilcox method)
     nonzero_mask = np.abs(diff) > 1e-12
     diff_nz = diff[nonzero_mask]
     n_nonzero = len(diff_nz)
@@ -95,15 +69,12 @@ def compute_wilcoxon_signed_rank(
             significant_at_05=False,
         )
 
-    # Rank absolute differences
     abs_diff = np.abs(diff_nz)
     ranks = rankdata(abs_diff, method="average")
 
     w_plus = float(np.sum(ranks[diff_nz > 0]))
     w_minus = float(np.sum(ranks[diff_nz < 0]))
 
-    # Mean and standard deviation under H0
-    # Tie correction for rank variance
     _, tie_counts = np.unique(ranks, return_counts=True)
     tie_corr = np.sum(tie_counts**3 - tie_counts) / 48.0
 
@@ -111,13 +82,8 @@ def compute_wilcoxon_signed_rank(
     var_w = (n_nonzero * (n_nonzero + 1) * (2 * n_nonzero + 1)) / 24.0 - tie_corr
     std_w = np.sqrt(max(var_w, 1e-9))
 
-    # Continuity correction
-    z_stat = (w_plus - mean_w - 0.5 * np.sign(w_plus - mean_w)) / std_w
-
-    # Two-sided p-value
+    z_stat = (w_plus - mean_w - 0.5 * np.sign(w_plus - mean_w)) / std_w  # continuity corr
     p_value = float(2.0 * norm.sf(abs(z_stat)))
-
-    # Effect size R = |Z| / sqrt(N)
     effect_r = abs(z_stat) / np.sqrt(n_total)
 
     if effect_r >= 0.5:
@@ -149,27 +115,7 @@ def compute_statistical_suite(
     proposed_method: str = "SMOTEFUNA",
     baseline_methods: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Computes Table 3 (p-values) and Table 4 (Wilcoxon R, W+, W-) across all
-    configurations:
-    - (AUC, SVM)
-    - (AUC, NB)
-    - (AUPR, SVM)
-    - (AUPR, NB)
-
-    Parameters
-    ----------
-    results_matrix : dict
-        Nested dictionary:
-        results_matrix[classifier][metric][method] -> list of scores across datasets.
-    proposed_method : str, default='SMOTEFUNA'
-    baseline_methods : list, default=['SMOTE', 'ADASYN', 'SWIM', 'Original']
-
-    Returns
-    -------
-    table3_df : pd.DataFrame (p-values)
-    table4_df : pd.DataFrame (R, W+, W-)
-    """
+    """Build Table 3 (p) and Table 4 (R / W+ / W-)."""
     if baseline_methods is None:
         baseline_methods = ["SMOTE", "ADASYN", "SWIM", "Original"]
 

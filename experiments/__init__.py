@@ -1,10 +1,4 @@
-"""
-SMOTEFUNA Experimental Benchmark Package.
-
-Provides tools for evaluating and replicating the empirical results from
-Tarawneh et al., 'SMOTEFUNA: Synthetic Minority Over-Sampling Technique
-Based on Furthest Neighbour Algorithm', IEEE Access, 2020.
-"""
+"""Experiment code: datasets, baselines, 5-fold CV, Wilcoxon."""
 
 from experiments.baselines import (
     AVAILABLE_RESAMPLERS,

@@ -1,14 +1,7 @@
-"""
-Baseline Resampling Algorithms.
+"""The other oversamplers we compare against.
 
-Provides a unified interface for all resampling techniques evaluated in
-Tarawneh et al., "SMOTEFUNA: Synthetic Minority Over-Sampling Technique
-Based on Furthest Neighbour Algorithm", IEEE Access, 2020:
-- SMOTEFUNA (Proposed method)
-- SMOTE (Chawla et al., 2002)
-- ADASYN (He et al., 2008)
-- SWIM (Bellinger et al., 2019 - Sampling With the Majority class)
-- Original Data (No-resampling baseline)
+SMOTE / ADASYN come from imbalanced-learn if it's installed, otherwise
+there's a small fallback. Original = don't resample at all.
 """
 
 from __future__ import annotations
@@ -23,7 +16,7 @@ ArrayLike = Union[np.ndarray, list]
 
 
 class OriginalDataBaseline:
-    """Identity baseline (no resampling), evaluating models on original imbalanced data."""
+    # just returns the data as-is. used as the "no oversampling" baseline.
 
     def __init__(self, random_state: Optional[int] = None) -> None:
         self.random_state = random_state
@@ -37,10 +30,7 @@ class OriginalDataBaseline:
 
 
 class SMOTEBaseline:
-    """
-    SMOTE baseline oversampler.
-    Uses imbalanced-learn when available, with a robust fallback for small minority counts.
-    """
+    # paper uses k=5. if a fold has fewer minority points, we drop k.
 
     def __init__(
         self,
@@ -67,7 +57,7 @@ class SMOTEBaseline:
         if n_min >= n_maj or n_min < 2:
             return X_arr.copy(), y_arr.copy()
 
-        # Adapt k_neighbors to available minority samples
+        # k can't be bigger than n_min - 1
         effective_k = min(self.k_neighbors, n_min - 1)
         if effective_k < 1:
             effective_k = 1
@@ -78,8 +68,7 @@ class SMOTEBaseline:
             smote = SMOTE(k_neighbors=effective_k, random_state=self.random_state)
             return smote.fit_resample(X_arr, y_arr)
         except Exception:
-            # Robust native SMOTE fallback
-            return self._native_smote(X_arr, y_arr, effective_k)
+            return self._native_smote(X_arr, y_arr, effective_k)  # imblearn missing / failed
 
     def _native_smote(
         self, X: np.ndarray, y: np.ndarray, k: int
@@ -94,7 +83,7 @@ class SMOTEBaseline:
         if n_to_add <= 0:
             return X.copy(), y.copy()
 
-        # Pairwise Euclidean distances within minority
+        # classic SMOTE: pick a neighbour and walk a random bit along the line
         diffs = minority[:, np.newaxis, :] - minority[np.newaxis, :, :]
         dist_matrix = np.sqrt(np.sum(diffs**2, axis=-1))
         np.fill_diagonal(dist_matrix, np.inf)
@@ -116,10 +105,7 @@ class SMOTEBaseline:
 
 
 class ADASYNBaseline:
-    """
-    ADASYN baseline oversampler.
-    Uses imbalanced-learn when available, with a robust fallback.
-    """
+    # same idea as SMOTE but denser near the boundary. falls back to SMOTE if it chokes.
 
     def __init__(
         self,
@@ -156,20 +142,15 @@ class ADASYNBaseline:
             adasyn = ADASYN(n_neighbors=effective_k, random_state=self.random_state)
             return adasyn.fit_resample(X_arr, y_arr)
         except Exception:
-            # In cases where ADASYN cannot allocate ratios (e.g., zero boundary points),
-            # fall back gracefully to SMOTE with effective_k
+            # ADASYN sometimes can't find boundary points, SMOTE is close enough
             return SMOTEBaseline(
                 k_neighbors=effective_k, random_state=self.random_state
             ).fit_resample(X_arr, y_arr)
 
 
 class SWIMBaseline:
-    """
-    SWIM (Sampling With the Majority class) oversampling algorithm.
-    Based on Colin Bellinger et al., 'Framework for extreme imbalance classification:
-    SWIM—sampling with the majority class', Knowledge and Information Systems, 2019.
-    Implements the RBF mutual density sampling strategy with full scikit-learn API compatibility.
-    """
+    # Bellinger 2019 — sample using the majority cloud (RBF density).
+    # we don't have their MATLAB code so this is a python-ish version.
 
     def __init__(
         self,
@@ -184,7 +165,6 @@ class SWIMBaseline:
         self.random_state = random_state
 
     def _score(self, point: np.ndarray, majority: np.ndarray, eps: float) -> float:
-        # Vectorized Manhattan distance and RBF density calculation
         dists = np.sum(np.abs(majority - point), axis=1)
         return float(np.sum(np.exp(-((dists * eps) ** 2))))
 
@@ -223,8 +203,7 @@ class SWIMBaseline:
         eps = self.epsilon if self.epsilon is not None else self._estimate_epsilon(majority)
 
         min_std = np.std(minority, axis=0)
-        # Avoid zero standard deviation
-        min_std = np.where(min_std == 0, 1e-3, min_std)
+        min_std = np.where(min_std == 0, 1e-3, min_std)  # constant features
         stds = self.tau * min_std
 
         synthetics = np.empty((n_to_add, X_arr.shape[1]), dtype=float)
@@ -247,8 +226,7 @@ class SWIMBaseline:
                     break
 
         if accepted < n_to_add:
-            # If not enough candidates met the strict RBF majority threshold,
-            # fill remainder with mild Gaussian perturbation of minority
+            # couldn't fill the quota, just jitter leftover minority points
             while accepted < n_to_add:
                 j = int(rng.integers(0, len(minority)))
                 synthetics[accepted] = minority[j] + rng.normal(0, stds * 0.5, size=X_arr.shape[1])
@@ -273,7 +251,7 @@ def get_resampler(
     random_state: Optional[int] = None,
     **kwargs: Any,
 ) -> Any:
-    """Factory helper to instantiate a resampler by name with standard parameters."""
+    """Look up SMOTE / ADASYN / SWIM / Original / SMOTEFUNA by name."""
     normalized = name.strip()
     if normalized not in AVAILABLE_RESAMPLERS:
         valid = list(AVAILABLE_RESAMPLERS.keys())

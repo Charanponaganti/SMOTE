@@ -5,5 +5,7 @@ __pycache__/
 _eq_cache/
 experiments/data_cache/
 make_slides.py
+*.pptx
 *.pptx~
 ~$*
+notebooks/

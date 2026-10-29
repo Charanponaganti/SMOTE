@@ -1,18 +1,4 @@
-"""
-SMOTEFUNA oversampler.
-
-Based on Tarawneh et al., "SMOTEFUNA: Synthetic Minority Over-Sampling
-Technique Based on Furthest Neighbour Algorithm", IEEE Access, 2020.
-
-Algorithm summary
------------------
-1. Split minority / majority.
-2. Need Rate = |majority| - |minority| new minority samples.
-3. Pick random seed S1; find furthest minority neighbour S2 (Manhattan).
-4. Draw each feature of S_new uniformly in [min(S1_j, S2_j), max(...)].
-5. Accept only if nearer to minority than majority (theta <= beta); else retry.
-6. Concatenate and optionally shuffle.
-"""
+"""SMOTEFUNA — oversample the minority class using furthest neighbours."""
 
 from __future__ import annotations
 
@@ -20,28 +6,10 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 
-
 ArrayLike = Union[np.ndarray, list]
 
 
 class SMOTEFUNA:
-    """
-    Parameter-free furthest-neighbour synthetic oversampler.
-
-    Parameters
-    ----------
-    sampling_strategy : float or str, default="auto"
-        - "auto": balance minority up to majority count.
-        - float in (0, 1]: desired minority/majority ratio after sampling.
-    shuffle : bool, default=True
-        Shuffle the balanced dataset before returning.
-    max_attempts_factor : int, default=50
-        Max candidate draws per accepted sample = factor * Rate.
-        Prevents infinite loops on pathological layouts.
-    random_state : int or None, default=None
-        Seed for reproducibility.
-    """
-
     def __init__(
         self,
         sampling_strategy: Union[str, float] = "auto",
@@ -59,19 +27,6 @@ class SMOTEFUNA:
     def fit_resample(
         self, X: ArrayLike, y: ArrayLike
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Oversample the minority class and return a (more) balanced dataset.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-        y : array-like of shape (n_samples,)
-            Binary labels. The minority class is the less frequent label.
-
-        Returns
-        -------
-        X_resampled, y_resampled
-        """
         X = np.asarray(X, dtype=float)
         y = np.asarray(y)
         if X.ndim != 2:
@@ -80,128 +35,94 @@ class SMOTEFUNA:
             raise ValueError("X and y must have the same number of samples.")
 
         rng = np.random.default_rng(self.random_state)
-        classes, counts = np.unique(y, return_counts=True)
-        if len(classes) != 2:
-            raise ValueError(
-                f"SMOTEFUNA supports binary classification; got {len(classes)} classes."
-            )
+        labels, counts = np.unique(y, return_counts=True)
+        if len(labels) != 2:
+            raise ValueError("SMOTEFUNA only handles two classes.")
 
-        # Minority = smaller class; tie-break: first unique in sorted order
-        minority_label = classes[int(np.argmin(counts))]
-        majority_label = classes[int(np.argmax(counts))]
+        # smaller class = minority
+        min_label = labels[int(np.argmin(counts))]
+        maj_label = labels[int(np.argmax(counts))]
         if counts[0] == counts[1]:
-            # Already balanced — return copy
-            X_out, y_out = X.copy(), y.copy()
-            if self.shuffle:
-                idx = rng.permutation(len(X_out))
-                return X_out[idx], y_out[idx]
-            return X_out, y_out
+            return self._maybe_shuffle(X.copy(), y.copy(), rng)
 
-        minority_mask = y == minority_label
-        majority_mask = y == majority_label
-        minority = X[minority_mask]
-        majority = X[majority_mask]
-
-        n_min = len(minority)
-        n_maj = len(majority)
-        if n_min < 2:
+        minority = X[y == min_label]
+        majority = X[y == maj_label]
+        if len(minority) < 2:
             raise ValueError(
                 "SMOTEFUNA needs at least 2 minority samples to form a furthest pair."
             )
 
-        target_min = self._target_minority_count(n_min, n_maj)
-        rate = target_min - n_min
-        if rate <= 0:
-            X_out, y_out = X.copy(), y.copy()
-            if self.shuffle:
-                idx = rng.permutation(len(X_out))
-                return X_out[idx], y_out[idx]
-            return X_out, y_out
+        n_new = self._how_many_to_add(len(minority), len(majority))
+        if n_new <= 0:
+            return self._maybe_shuffle(X.copy(), y.copy(), rng)
 
-        synthetics = self._generate_synthetics(
-            minority=minority,
-            majority=majority,
-            rate=rate,
-            rng=rng,
+        extra = self._make_new_points(minority, majority, n_new, rng)
+        X_out = np.vstack([X, extra])
+        y_out = np.concatenate(
+            [y, np.full(len(extra), min_label, dtype=y.dtype)]
         )
+        return self._maybe_shuffle(X_out, y_out, rng)
 
-        X_resampled = np.vstack([X, synthetics])
-        y_resampled = np.concatenate(
-            [y, np.full(len(synthetics), minority_label, dtype=y.dtype)]
-        )
-
-        if self.shuffle:
-            idx = rng.permutation(len(X_resampled))
-            X_resampled = X_resampled[idx]
-            y_resampled = y_resampled[idx]
-
-        return X_resampled, y_resampled
-
-    def _target_minority_count(self, n_min: int, n_maj: int) -> int:
-        strategy = self.sampling_strategy
-        if strategy == "auto":
-            return n_maj
-        if isinstance(strategy, (int, float)):
-            ratio = float(strategy)
+    def _how_many_to_add(self, n_min: int, n_maj: int) -> int:
+        # "auto" = add until minority matches majority
+        if self.sampling_strategy == "auto":
+            return n_maj - n_min
+        if isinstance(self.sampling_strategy, (int, float)):
+            ratio = float(self.sampling_strategy)
             if not 0.0 < ratio <= 1.0:
                 raise ValueError("sampling_strategy float must be in (0, 1].")
-            return max(n_min, int(np.ceil(ratio * n_maj)))
-        raise ValueError(
-            "sampling_strategy must be 'auto' or a float in (0, 1]."
-        )
+            return max(0, int(np.ceil(ratio * n_maj)) - n_min)
+        raise ValueError("sampling_strategy must be 'auto' or a float in (0, 1].")
 
-    def _generate_synthetics(
-        self,
-        minority: np.ndarray,
-        majority: np.ndarray,
-        rate: int,
-        rng: np.random.Generator,
-    ) -> np.ndarray:
-        n_features = minority.shape[1]
-        synthetics = np.empty((rate, n_features), dtype=float)
-        accepted = 0
-        attempts = 0
-        max_attempts = max(rate * self.max_attempts_factor, rate)
+    def _maybe_shuffle(self, X, y, rng):
+        if not self.shuffle:
+            return X, y
+        order = rng.permutation(len(X))
+        return X[order], y[order]
 
-        while accepted < rate and attempts < max_attempts:
-            attempts += 1
-            # Random minority seed
-            i1 = int(rng.integers(0, len(minority)))
-            s1 = minority[i1]
+    def _make_new_points(self, minority, majority, n_new, rng):
+        """This is the actual SMOTEFUNA step"""
+        extra = np.empty((n_new, minority.shape[1]))
+        got = 0
+        tries = 0
+        max_tries = max(n_new * self.max_attempts_factor, n_new)
 
-            # Furthest minority neighbour (exclude self)
-            dists = np.sum(np.abs(minority - s1), axis=1)
-            dists[i1] = -1.0  # ensure self is never chosen as furthest
-            i2 = int(np.argmax(dists))
-            s2 = minority[i2]
+        while got < n_new and tries < max_tries:
+            tries += 1
 
-            # Cuboidal random sample between s1 and s2
-            lo = np.minimum(s1, s2)
-            hi = np.maximum(s1, s2)
-            # Where lo == hi, Random(lo, hi) is a single point
-            s_new = rng.uniform(lo, hi)
+            # 1. pick a random minority point S1
+            i = int(rng.integers(0, len(minority)))
+            s1 = minority[i]
 
-            # Safety check: nearer to minority than majority?
-            theta = np.min(np.sum(np.abs(minority - s_new), axis=1))
-            beta = np.min(np.sum(np.abs(majority - s_new), axis=1))
+            # 2. find its furthest minority neighbour S2 (manhattan distance)
+            dist = np.abs(minority - s1).sum(axis=1)
+            dist[i] = -1  # ignore itself
+            s2 = minority[int(np.argmax(dist))]
+
+            # 3. draw a new point inside the box between S1 and S2
+            low = np.minimum(s1, s2)
+            high = np.maximum(s1, s2)
+            s_new = rng.uniform(low, high)
+
+            # 4. keep it only if it is closer to minority than to majority
+            theta = np.abs(minority - s_new).sum(axis=1).min()
+            beta = np.abs(majority - s_new).sum(axis=1).min()
             if theta <= beta:
-                synthetics[accepted] = s_new
-                accepted += 1
+                extra[got] = s_new
+                got += 1
 
-        if accepted < rate:
+        if got < n_new:
             if self.strict:
                 raise RuntimeError(
-                    f"Could only accept {accepted}/{rate} synthetic samples "
-                    f"after {attempts} attempts. The minority/majority geometry "
-                    f"may be heavily overlapping; try more minority seeds or "
-                    f"increase max_attempts_factor."
+                    f"Could only accept {got}/{n_new} synthetic samples "
+                    f"after {tries} attempts."
                 )
             import warnings
 
             warnings.warn(
-                f"SMOTEFUNA generated {accepted}/{rate} synthetic samples after "
-                f"{attempts} attempts due to high class overlap. Returning available samples.",
+                f"SMOTEFUNA generated {got}/{n_new} synthetic samples after "
+                f"{tries} attempts due to high class overlap. Returning available samples.",
                 UserWarning,
             )
-            return synthetics[:accepted]
-        return synthetics
+            return extra[:got]
+        return extra

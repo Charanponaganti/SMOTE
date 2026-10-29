@@ -1,12 +1,6 @@
-"""
-Main Benchmark Runner for SMOTEFUNA Experimental Replication.
+"""Run the 33-dataset comparison.
 
-CLI entry-point to execute the experimental evaluations:
-- 5-fold cross-validation on real and Table 1 benchmark datasets
-- Compares SMOTEFUNA vs SMOTE, ADASYN, SWIM, and Original Data
-- Evaluates on Naive Bayes and Support Vector Machine (SVM)
-- Computes ROC-AUC, AUPR, win counts (Table 2), and Wilcoxon signed-rank tests (Tables 3 & 4)
-- Generates publication plots (Figures 8, 9, 10) and markdown/CSV tables.
+    python experiments/run_experiments.py --full --real --n-trials 5
 """
 
 from __future__ import annotations
@@ -17,7 +11,6 @@ from pathlib import Path
 
 import pandas as pd
 
-# Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -34,7 +27,7 @@ from experiments.visualize import plot_pca_projections, plot_roc_and_pr_grid
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run SMOTEFUNA research paper benchmark evaluations."
+        description="SMOTEFUNA vs SMOTE / ADASYN / SWIM / original, 5-fold CV."
     )
     parser.add_argument(
         "--quick",
@@ -91,7 +84,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def df_to_markdown(df: pd.DataFrame) -> str:
-    """Renders a pandas DataFrame as a GitHub-flavored markdown table."""
+    # pandas to_markdown needs tabulate, so there's a fallback
     try:
         return df.to_markdown(index=False)
     except Exception:
@@ -106,22 +99,18 @@ def save_tables(results: dict, out_dir: Path) -> None:
     tables_dir = out_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
 
-    # Table 2: Wins
     results["table2_wins"].to_csv(tables_dir / "table2_wins.csv", index=False)
     with open(tables_dir / "table2_wins.md", "w", encoding="utf-8") as f:
         f.write(df_to_markdown(results["table2_wins"]))
 
-    # Table 3: Wilcoxon p-values
     results["table3_p_values"].to_csv(tables_dir / "table3_wilcoxon_pvalues.csv", index=False)
     with open(tables_dir / "table3_wilcoxon_pvalues.md", "w", encoding="utf-8") as f:
         f.write(df_to_markdown(results["table3_p_values"]))
 
-    # Table 4: Wilcoxon ranks & effect sizes
     results["table4_wilcoxon_ranks"].to_csv(tables_dir / "table4_wilcoxon_ranks.csv", index=False)
     with open(tables_dir / "table4_wilcoxon_ranks.md", "w", encoding="utf-8") as f:
         f.write(df_to_markdown(results["table4_wilcoxon_ranks"]))
 
-    # Tables 5-8: Mean +/- STD per configuration
     mapping = {
         "AUC_SVM": "table5_auc_svm",
         "AUPR_SVM": "table6_aupr_svm",
@@ -131,13 +120,11 @@ def save_tables(results: dict, out_dir: Path) -> None:
     for key, filename in mapping.items():
         if key in results["summary_tables"]:
             df = results["summary_tables"][key]
-            # Select display columns (Dataset, Name, and formatted methods)
             display_cols = ["Dataset", "Name"] + [c for c in df.columns if not c.endswith("_mean") and c not in ["Dataset", "Name"]]
             df[display_cols].to_csv(tables_dir / f"{filename}.csv", index=False)
             with open(tables_dir / f"{filename}.md", "w", encoding="utf-8") as f:
                 f.write(df_to_markdown(df[display_cols]))
 
-    # Master Markdown Report
     report_path = out_dir / "benchmark_summary.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("# SMOTEFUNA Empirical Benchmark Evaluation Report\n\n")
@@ -173,9 +160,7 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=================================================================")
-    print(" SMOTEFUNA RESEARCH BENCHMARK EXPERIMENT PIPELINE")
-    print("=================================================================")
+    print("SMOTEFUNA benchmark")
 
     use_real = bool(args.real)
     if use_real:
@@ -183,7 +168,6 @@ def main() -> None:
     else:
         print("Data source: generated stand-ins (pass --real to use OpenML)")
 
-    # Select datasets
     if args.datasets:
         d_ids = [d.strip() for d in args.datasets.split(",") if d.strip()]
         datasets = {}
@@ -215,31 +199,20 @@ def main() -> None:
 
     results = pipeline.run_suite(datasets)
 
-    # Save CSV and Markdown tables
     save_tables(results, out_dir)
 
-    # Print Win Table in console
-    print("\n-----------------------------------------------------------------")
-    print("TABLE 2: WIN COUNTS SUMMARY")
-    print("-----------------------------------------------------------------")
+    print("\nTable 2 — wins")
     print(results["table2_wins"].to_string(index=False))
-    print("\n-----------------------------------------------------------------")
-    print("TABLE 3: WILCOXON SIGNED-RANK TEST P-VALUES")
-    print("-----------------------------------------------------------------")
+    print("\nTable 3 — Wilcoxon p-values")
     print(results["table3_p_values"].to_string(index=False))
-    print("\n-----------------------------------------------------------------")
-    print("TABLE 4: WILCOXON EFFECT SIZE R, W+, W-")
-    print("-----------------------------------------------------------------")
+    print("\nTable 4 — R / W+ / W-")
     print(results["table4_wilcoxon_ranks"].to_string(index=False))
-    print("-----------------------------------------------------------------")
-
-    # Generate Figures
     if args.plots:
         figures_dir = out_dir / "figures"
         figures_dir.mkdir(parents=True, exist_ok=True)
-        print("\nGenerating publication figures...")
+        print("\nsaving figures...")
 
-        # Figures 9 & 10: ROC and PR Curves for D10, D16, D17, D19 (or available datasets)
+        # paper uses D10, D16, D17, D19 for the ROC/PR grids
         plot_d_ids = [d for d in ["D10", "D16", "D17", "D19"] if any(k.startswith(f"{d}_") for k in datasets)]
         if not plot_d_ids:
             plot_d_ids = [k.split("_")[0] for k in list(datasets.keys())[:4]]
@@ -260,7 +233,6 @@ def main() -> None:
             allow_online=use_real,
         )
 
-        # Figure 8: PCA 2D projections
         pca_d_ids = [d for d in ["D4", "D6", "D12", "D13", "D27", "D31"] if any(k.startswith(f"{d}_") for k in datasets)]
         if len(pca_d_ids) < 3:
             pca_d_ids = [k.split("_")[0] for k in list(datasets.keys())[:min(6, len(datasets))]]
@@ -271,9 +243,9 @@ def main() -> None:
             seed=args.seed,
             allow_online=use_real,
         )
-        print(f"Publication figures successfully saved to {figures_dir}")
+        print(f"figures -> {figures_dir}")
 
-    print("\nBenchmark execution completed successfully!")
+    print("done")
 
 
 if __name__ == "__main__":

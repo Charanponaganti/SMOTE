@@ -1,15 +1,7 @@
-"""
-5-Fold Cross-Validation Evaluation Pipeline.
+"""5-fold CV for the paper setup.
 
-Implements the experimental methodology described in Section IV:
-- Stratified 5-fold cross-validation
-- Repeated multi-trial evaluation (e.g. 1 to 30 trials)
-- Zero data leakage: z-score standardization and oversampling are fit ONLY
-  on the training fold; evaluation is on untouched imbalanced test fold.
-- Classifiers: Naive Bayes (GaussianNB) and SVM (RBF kernel, SVC with probabilities)
-- Algorithms: SMOTEFUNA, SMOTE, ADASYN, SWIM, Original Data
-- Metrics: ROC-AUC and AUPR
-- Aggregates Mean +/- STD and generates Tables 2, 3, 4, 5, 6, 7, 8.
+Scale + oversample on the train fold only. Test fold stays imbalanced.
+Paper used 30 repeats; we usually pass --n-trials 5 because 30 takes forever.
 """
 
 from __future__ import annotations
@@ -32,7 +24,7 @@ from experiments.statistical_tests import compute_statistical_suite
 
 
 def default_classifiers(seed: int = 42) -> Dict[str, Any]:
-    """Returns the two standard classifiers used in the SMOTEFUNA paper."""
+    # paper uses NB + RBF SVM. ours is sklearn GaussianNB, not MATLAB kernel NB
     return {
         "NB": GaussianNB(),
         "SVM": SVC(kernel="rbf", probability=True, random_state=seed),
@@ -69,9 +61,7 @@ class ExperimentResult:
 
 
 class BenchmarkPipeline:
-    """
-    Execution engine for 5-fold cross-validated benchmark experiments.
-    """
+    # runs every method x both classifiers on one dataset at a time
 
     def __init__(
         self,
@@ -95,13 +85,7 @@ class BenchmarkPipeline:
         y: np.ndarray,
         meta: DatasetMeta,
     ) -> Dict[str, Dict[str, ExperimentResult]]:
-        """
-        Runs repeated 5-fold CV on a single dataset across all methods & classifiers.
-
-        Returns
-        -------
-        dict : {classifier_name: {method_name: ExperimentResult}}
-        """
+        """One dataset, all methods, both classifiers."""
         results: Dict[str, Dict[str, ExperimentResult]] = {
             clf_name: {
                 m: ExperimentResult(dataset_name=meta.name, dataset_id=meta.dataset_id, classifier=clf_name, method=m)
@@ -110,7 +94,6 @@ class BenchmarkPipeline:
             for clf_name in self.classifiers
         }
 
-        # Multi-trial loop
         for trial in range(self.n_trials):
             trial_seed = self.random_state + trial * 101
             skf = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=trial_seed)
@@ -119,12 +102,11 @@ class BenchmarkPipeline:
                 X_train, y_train = X[train_idx], y[train_idx]
                 X_test, y_test = X[test_idx], y[test_idx]
 
-                # 1. Standardize (z-score) fitted strictly on training data
+                # z-score on train only — otherwise we'd leak the test set
                 scaler = StandardScaler().fit(X_train)
                 X_train_scaled = scaler.transform(X_train)
                 X_test_scaled = scaler.transform(X_test)
 
-                # 2. Resample and evaluate for each method
                 for m in self.methods:
                     fold_seed = trial_seed + fold_idx * 17
                     resampler = get_resampler(m, random_state=fold_seed)
@@ -132,12 +114,10 @@ class BenchmarkPipeline:
                     try:
                         X_res, y_res = resampler.fit_resample(X_train_scaled, y_train)
                     except Exception:
-                        # Defensive fallback to unresampled train data if method encounters extreme geometry
+                        # some methods blow up on tiny minority folds, just skip oversampling
                         X_res, y_res = X_train_scaled, y_train
 
-                    # 3. Train each classifier and evaluate
                     for clf_name, clf_template in self.classifiers.items():
-                        # Clone/instantiate classifier with fold seed
                         clf_params = clf_template.get_params()
                         if "random_state" in clf_params:
                             clf_params["random_state"] = fold_seed
@@ -145,10 +125,8 @@ class BenchmarkPipeline:
 
                         try:
                             clf.fit(X_res, y_res)
-                            # Predict probability of positive / minority class (1)
-                            y_prob = clf.predict_proba(X_test_scaled)[:, 1]
+                            y_prob = clf.predict_proba(X_test_scaled)[:, 1]  # P(minority)
                         except Exception:
-                            # Fallback dummy prediction if model fails
                             y_prob = np.full(len(y_test), 0.5)
 
                         metrics = compute_all_metrics(y_test, y_prob)
@@ -162,12 +140,7 @@ class BenchmarkPipeline:
         datasets: Dict[str, Tuple[np.ndarray, np.ndarray, DatasetMeta]],
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
     ) -> Dict[str, Any]:
-        """
-        Executes the benchmark across all provided datasets.
-
-        Returns structured dictionary containing raw results, summary tables,
-        win counts, and Wilcoxon statistical tests.
-        """
+        """Loop all datasets then build the paper-style tables."""
         total = len(datasets)
         all_dataset_results: Dict[str, Dict[str, Dict[str, ExperimentResult]]] = {}
 
@@ -188,14 +161,13 @@ class BenchmarkPipeline:
         if self.verbose:
             print(f"Benchmark finished across {total} datasets in {elapsed:.2f} seconds.")
 
-        # Build paper-compliant tables
         return self._build_paper_report(all_dataset_results)
 
     def _build_paper_report(
         self,
         all_results: Dict[str, Dict[str, Dict[str, ExperimentResult]]],
     ) -> Dict[str, Any]:
-        """Formats the results into exact tables corresponding to Tables 2 to 8 of the paper."""
+        """Tables 2–8, same layout as the paper (numbers won't match 30 trials)."""
         classifiers = list(self.classifiers.keys())
         methods = self.methods
 

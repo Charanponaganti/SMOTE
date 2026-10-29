@@ -1,10 +1,6 @@
-"""
-Visualization Tools for SMOTEFUNA Paper Reproduction.
+"""Plots for fig 8 (PCA) and figs 9–10 (ROC / PR).
 
-Implements publication-quality plotting tools:
-1. Multi-method ROC and PR curve comparisons (matching Figures 9 & 10 of the paper).
-2. 2D PCA projection of minority, majority, and synthetic samples (matching Figure 8 of the paper).
-3. Win count and performance comparison charts.
+Not the paper's MATLAB plots, just the same layout.
 """
 
 from __future__ import annotations
@@ -25,7 +21,6 @@ from experiments.baselines import get_resampler
 from experiments.datasets import DatasetMeta, load_benchmark_dataset
 from experiments.metrics import compute_aupr, compute_roc_auc
 
-# Paper-inspired color palette
 METHOD_COLORS = {
     "SMOTEFUNA": "#1B7837",  # Strong Green
     "SMOTE": "#2166AC",      # Blue
@@ -50,17 +45,7 @@ def plot_roc_and_pr_grid(
     seed: int = 42,
     allow_online: bool = False,
 ) -> plt.Figure:
-    """
-    Plots a multi-row grid of ROC (left) and PR (right) curves comparing all methods,
-    matching Figure 9 (NB) and Figure 10 (SVM) of the paper.
-
-    Parameters
-    ----------
-    dataset_ids : list of dataset IDs, e.g. ['D10', 'D16', 'D17', 'D19']
-    classifier_name : 'NB' or 'SVM'
-    save_path : optional Path to save the figure
-    seed : random seed
-    """
+    """ROC on the left, PR on the right. one row per dataset."""
     n_rows = len(dataset_ids)
     fig, axes = plt.subplots(n_rows, 2, figsize=(10, 3.4 * n_rows))
     if n_rows == 1:
@@ -83,8 +68,7 @@ def plot_roc_and_pr_grid(
         ax_roc = axes[row_idx, 0]
         ax_pr = axes[row_idx, 1]
 
-        # Prior for PR baseline
-        prior_minority = float(np.mean(y_test == 1))
+        prior_minority = float(np.mean(y_test == 1))  # chance line on PR
 
         for m in methods:
             color = METHOD_COLORS.get(m, "#333333")
@@ -101,17 +85,14 @@ def plot_roc_and_pr_grid(
             clf.fit(X_res, y_res)
             y_prob = clf.predict_proba(X_te_s)[:, 1]
 
-            # ROC
             fpr, tpr, _ = roc_curve(y_test, y_prob)
             auc_val = compute_roc_auc(y_test, y_prob)
             ax_roc.plot(fpr, tpr, color=color, linestyle=ls, linewidth=lw, label=f"{m} ({auc_val:.3f})")
 
-            # PR
             precision, recall, _ = precision_recall_curve(y_test, y_prob)
             aupr_val = compute_aupr(y_test, y_prob)
             ax_pr.plot(recall, precision, color=color, linestyle=ls, linewidth=lw, label=f"{m} ({aupr_val:.3f})")
 
-        # Diagonal on ROC
         ax_roc.plot([0, 1], [0, 1], "k--", alpha=0.3, linewidth=1.0)
         ax_roc.set_xlim([-0.02, 1.02])
         ax_roc.set_ylim([-0.02, 1.05])
@@ -121,7 +102,6 @@ def plot_roc_and_pr_grid(
         ax_roc.grid(True, alpha=0.3)
         ax_roc.legend(loc="lower right", fontsize=8)
 
-        # Baseline on PR
         ax_pr.axhline(prior_minority, color="gray", linestyle=":", alpha=0.5, label=f"Baseline ({prior_minority:.2f})")
         ax_pr.set_xlim([-0.02, 1.02])
         ax_pr.set_ylim([-0.02, 1.05])
@@ -148,16 +128,7 @@ def plot_pca_projections(
     seed: int = 42,
     allow_online: bool = False,
 ) -> plt.Figure:
-    """
-    Reproduces Figure 8 of the paper:
-    PCA 2D projection of majority, minority, and newly created synthetic examples using SMOTEFUNA.
-
-    Parameters
-    ----------
-    dataset_ids : list of 6 dataset IDs, e.g. ['D4', 'D6', 'D12', 'D13', 'D27', 'D31']
-    save_path : optional Path to save the plot
-    seed : random seed
-    """
+    """2D PCA of majority / minority / SMOTEFUNA synthetics (fig 8)."""
     n_plots = len(dataset_ids)
     n_cols = min(3, n_plots)
     n_rows = int(np.ceil(n_plots / n_cols))
@@ -169,18 +140,14 @@ def plot_pca_projections(
         ax = axes_flat[idx]
         X, y, meta = load_benchmark_dataset(d_id, seed=seed, allow_online=allow_online)
 
-        # Run SMOTEFUNA
         resampler = get_resampler("SMOTEFUNA", random_state=seed, shuffle=False)
         X_res, y_res = resampler.fit_resample(X, y)
 
-        # Original samples
         n_orig = len(X)
         minority_orig = X[y == 1]
         majority_orig = X[y == 0]
-        # Synthetics are appended at the end when shuffle=False
-        synthetics = X_res[n_orig:]
+        synthetics = X_res[n_orig:]  # shuffle=False so new points are at the end
 
-        # Fit PCA on original dataset
         pca = PCA(n_components=2, random_state=seed)
         pca.fit(X)
 
@@ -188,7 +155,6 @@ def plot_pca_projections(
         min_pca = pca.transform(minority_orig)
         syn_pca = pca.transform(synthetics) if len(synthetics) > 0 else np.empty((0, 2))
 
-        # Majority: Blue points
         ax.scatter(
             maj_pca[:, 0],
             maj_pca[:, 1],
@@ -199,7 +165,6 @@ def plot_pca_projections(
             label="Majority",
             edgecolors="none",
         )
-        # Minority: Red points
         ax.scatter(
             min_pca[:, 0],
             min_pca[:, 1],
@@ -210,7 +175,6 @@ def plot_pca_projections(
             label="Minority",
             edgecolors="none",
         )
-        # Synthetic: Red crosses
         if len(syn_pca) > 0:
             ax.scatter(
                 syn_pca[:, 0],
@@ -229,7 +193,6 @@ def plot_pca_projections(
         ax.legend(loc="best", fontsize=8)
         ax.grid(True, alpha=0.25)
 
-    # Turn off any unused subplots
     for j in range(idx + 1, len(axes_flat)):
         axes_flat[j].axis("off")
 

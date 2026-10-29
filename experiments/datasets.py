@@ -1,14 +1,7 @@
-"""
-Benchmark Datasets Loader & Registry.
+"""The 33 datasets from Table 1.
 
-Implements access to the 33 benchmark datasets analyzed in Table 1 of
-Tarawneh et al., 'SMOTEFUNA: Synthetic Minority Over-Sampling Technique
-Based on Furthest Neighbour Algorithm', IEEE Access, 2020.
-
-Supports:
-1. Real benchmark datasets (Wisconsin, Pima, Bank, Heart, Vehicle0-3, etc.)
-2. OpenML online fetching with local disk caching
-3. Exact Table 1 benchmark dataset generator for offline reproducibility
+--real pulls OpenML copies (cached under data_cache/).
+Without --real we fake them with make_classification so it still runs offline.
 """
 
 from __future__ import annotations
@@ -37,8 +30,7 @@ class DatasetMeta:
     openml_id: Optional[int] = None
 
 
-# Exact 33 benchmark datasets from Table 1 of the paper
-# openml_id values are used by --real to download KEEL/PROMISE/UCI copies.
+# paper Table 1. IR=605 for Kc1 is what they printed, looks off but we kept it.
 TABLE_1_DATASETS: Dict[str, DatasetMeta] = {
     "D1": DatasetMeta("D1", "Ar1", 121, 2, 13.4, 30, openml_name="ar1", openml_id=1240),
     "D2": DatasetMeta("D2", "Ar3", 63, 2, 7.875, 30, openml_name="ar3", openml_id=1239),
@@ -75,7 +67,7 @@ TABLE_1_DATASETS: Dict[str, DatasetMeta] = {
     "D33": DatasetMeta("D33", "Yeast5", 1484, 2, 32.73, 9, openml_name="yeast", openml_id=181),
 }
 
-# KEEL-style one-vs-rest / one-vs-one recipes that cannot be inferred from IR alone
+# some KEEL sets aren't binary — these are the recipes we used
 _EXPLICIT_BINARIZE = {
     "D16": {"mode": "vs_rest", "minority": {"19", "19.0"}},
     "D17": {"mode": "ovo", "minority": {"9", "9.0"}, "majority": {"18", "18.0"}},
@@ -91,7 +83,6 @@ _EXPLICIT_BINARIZE = {
     },
 }
 
-# Name to ID map
 NAME_TO_ID: Dict[str, str] = {
     meta.name.lower(): meta.dataset_id for meta in TABLE_1_DATASETS.values()
 }
@@ -100,7 +91,6 @@ for d_id in TABLE_1_DATASETS:
 
 
 def get_table1_metadata() -> pd.DataFrame:
-    """Returns a pandas DataFrame summarizing the 33 benchmark datasets from Table 1."""
     records = []
     for d_id, m in TABLE_1_DATASETS.items():
         records.append({
@@ -171,7 +161,7 @@ def _binarize_vs_rest(y_str: np.ndarray, minority_labels: Optional[set] = None, 
 
 
 def _binarize_ovo(y_str: np.ndarray, target_ir: float, target_n: int, minority_labels=None, majority_labels=None) -> Tuple[np.ndarray, np.ndarray]:
-    """Returns mask, y_binary for a one-vs-one subset."""
+    """Keep two classes only (one-vs-one)."""
     if minority_labels and majority_labels:
         min_set = {_norm_label(v) for v in minority_labels}
         maj_set = {_norm_label(v) for v in majority_labels}
@@ -209,7 +199,7 @@ def _binarize_subset(y_str: np.ndarray, minority_labels: set, majority_labels: s
 
 
 def _frame_to_xy(fetched) -> Tuple[np.ndarray, np.ndarray]:
-    """Convert an OpenML fetch (as_frame=True) into numeric X and raw y."""
+    # OpenML sometimes gives strings / nans, just make it numeric
     X_df = pd.DataFrame(fetched.data).copy()
     y_raw = np.asarray(fetched.target)
 
@@ -249,7 +239,7 @@ def _apply_keel_binarize(meta: DatasetMeta, X: np.ndarray, y_raw: np.ndarray) ->
         y = _binarize_vs_rest(y_str, target_ir=meta.ir)
         return X, y
 
-    # Multi-class KEEL "*0" / one-vs-rest: pick the class whose IR is closest to Table 1
+    # shuttle etc: pick the split whose IR is closest to Table 1
     if "shuttle" in meta.name.lower() or meta.dataset_id == "D21":
         mask, y = _binarize_ovo(y_str, target_ir=meta.ir, target_n=meta.n_instances)
         return X[mask], y
@@ -285,7 +275,7 @@ def _real_cache_path(meta: DatasetMeta) -> Path:
 
 
 def _load_real_wisconsin() -> Tuple[np.ndarray, np.ndarray]:
-    """Loads sklearn Wisconsin as a local fallback (not the KEEL 683 x 10 table)."""
+    # sklearn version, not the KEEL 683-row one. only used if OpenML is off.
     data = load_breast_cancer()
     X = data.data
     y = data.target
@@ -296,7 +286,7 @@ def _load_real_wisconsin() -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _load_real_banknote() -> Optional[Tuple[np.ndarray, np.ndarray]]:
-    """Loads real Banknote Authentication dataset if cached, or returns None."""
+    # leftover cache from earlier, ignore if missing
     cache_file = CACHE_DIR / "banknote.npz"
     if cache_file.exists():
         loaded = np.load(cache_file)
@@ -307,15 +297,11 @@ def _load_real_banknote() -> Optional[Tuple[np.ndarray, np.ndarray]]:
 def generate_benchmark_from_meta(
     meta: DatasetMeta, seed: int = 42
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Generates a realistic imbalanced benchmark dataset matching the exact metadata
-    from Table 1 (instances, features, and imbalance ratio) with controlled overlap.
-    """
+    """Fake data with the same size / IR as Table 1. not the real KEEL tables."""
     n_samples = meta.n_instances
     ir = meta.ir
     n_features = meta.n_features
 
-    # Calculate exact minority and majority sample sizes
     n_min = max(2, int(round(n_samples / (ir + 1.0))))
     n_maj = n_samples - n_min
     weights = [n_maj / n_samples, n_min / n_samples]
@@ -337,7 +323,6 @@ def generate_benchmark_from_meta(
         random_state=seed,
     )
 
-    # Ensure minority label is 1
     classes, counts = np.unique(y, return_counts=True)
     min_label = classes[np.argmin(counts)]
     y_binary = np.where(y == min_label, 1, 0)
@@ -350,18 +335,7 @@ def load_benchmark_dataset(
     seed: int = 42,
     verbose: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, DatasetMeta]:
-    """
-    Loads a benchmark dataset by Table 1 ID (e.g. 'D1', 'D10', 'D19') or Name (e.g. 'Pima', 'Wisconsin').
-
-    If allow_online=True, downloads the real OpenML/KEEL-style dataset, applies the
-    paper's binary encoding, and caches it under experiments/data_cache/real_*.npz.
-
-    Returns
-    -------
-    X : np.ndarray
-    y : np.ndarray (binary labels 0 and 1, with 1 as minority)
-    meta : DatasetMeta
-    """
+    """Load by id ('D19') or name ('Pima'). minority is always 1."""
     key = name_or_id.strip().lower()
     if key not in NAME_TO_ID:
         raise ValueError(
@@ -395,7 +369,6 @@ def load_benchmark_dataset(
             if verbose:
                 print(f"  {meta.dataset_id} {meta.name}: OpenML failed ({exc}); using GENERATED stand-in")
 
-    # Offline / fallback path
     if not allow_online and meta.name.lower() == "wisconsin":
         X, y = _load_real_wisconsin()
         return X, y, meta
@@ -416,11 +389,7 @@ def load_representative_suite(
     allow_online: bool = False,
     verbose: bool = False,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray, DatasetMeta]]:
-    """
-    Loads a representative subset of benchmark datasets across low, medium,
-    and extreme imbalance ratios and feature dimensionalities.
-    Used for rapid automated verification and demonstration.
-    """
+    """Small mix of IRs so --quick doesn't take forever."""
     selected_ids = ["D10", "D12", "D16", "D17", "D19", "D27"]
     suite = {}
     for d_id in selected_ids:
@@ -437,7 +406,7 @@ def load_all_benchmark_datasets(
     allow_online: bool = False,
     verbose: bool = False,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray, DatasetMeta]]:
-    """Loads all 33 benchmark datasets (or specified list of IDs)."""
+    """All 33, or whatever ids you pass."""
     target_ids = dataset_ids if dataset_ids is not None else list(TABLE_1_DATASETS.keys())
     all_data = {}
     for d_id in target_ids:
